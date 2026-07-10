@@ -1,0 +1,9 @@
+.env
+.vscode/.env
+.venv/
+__pycache__/
+*.pyc
+data/conversations.json
+data/conversations.json.tmp
+data/latency_report.json
+data/latency_report.json.tmp
