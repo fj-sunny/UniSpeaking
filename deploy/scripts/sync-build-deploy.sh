@@ -34,7 +34,9 @@ flock -n 9 || { log "已有部署任务运行，跳过本次检查"; exit 0; }
 
 git -C "$BASE_DIR" remote set-url origin "$REPOSITORY_URL"
 git -C "$BASE_DIR" fetch --prune origin "$BRANCH"
-target_sha="$(git -C "$BASE_DIR" rev-parse "origin/$BRANCH")"
+# An explicit single-branch fetch always updates FETCH_HEAD, but it may leave an
+# existing remote-tracking ref stale. Deploy the commit fetched in this run.
+target_sha="$(git -C "$BASE_DIR" rev-parse FETCH_HEAD)"
 current_sha="$(git -C "$BASE_DIR" rev-parse HEAD)"
 env_sha="$(sha256sum "$ENV_FILE" | awk '{print $1}')"
 
