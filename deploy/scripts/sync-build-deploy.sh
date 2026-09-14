@@ -83,6 +83,10 @@ docker run --rm --entrypoint /bin/sh deploy-admin:latest -ec \
 log "启动生产服务"
 "${compose[@]}" up -d --no-build postgres backend frontend admin nginx \
   || fail "Compose 启动失败"
+"${compose[@]}" exec -T nginx nginx -t \
+  || fail "Nginx 配置校验失败"
+"${compose[@]}" exec -T nginx nginx -s reload \
+  || fail "Nginx 重载失败"
 
 ready=false
 for _ in $(seq 1 60); do
