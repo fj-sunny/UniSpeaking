@@ -105,7 +105,7 @@ public class CustomSceneService {
 		}
 		UserProfile profile = profileService.getProfile(definition.userId());
 		byte[] audio = providerRegistry.generateSpeechAudioBytes(
-				AiProviderRegistry.QWEN_TTS,
+				model,
 				text.strip(),
 				null,
 				profile == null ? null : profile.voiceId());

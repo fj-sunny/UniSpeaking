@@ -115,9 +115,7 @@ public class AiProviderRegistry {
 			@Value("${AI_PROVIDER_ROUTE_TTS:}")
 			String ttsRoute,
 			@Value("${AI_PROVIDER_ROUTE_TRANSCRIPTION:}")
-			String transcriptionRoute,
-			@Value("${AI_QINIU_MODELS_ENABLED:false}")
-			boolean qiniuModelsEnabled) {
+			String transcriptionRoute) {
 		this(
 				realtimeProviders,
 				llmProviders,
@@ -129,8 +127,7 @@ public class AiProviderRegistry {
 						AiCapability.LLM, parseRoute(llmRoute),
 						AiCapability.SCORING, parseRoute(scoringRoute),
 						AiCapability.TTS, parseRoute(ttsRoute),
-						AiCapability.TRANSCRIPTION, parseRoute(transcriptionRoute)),
-				qiniuModelsEnabled);
+						AiCapability.TRANSCRIPTION, parseRoute(transcriptionRoute)));
 	}
 
 	public AiProviderRegistry(
@@ -155,30 +152,6 @@ public class AiProviderRegistry {
 			List<TtsProvider> ttsProviders,
 			List<TranscriptionProvider> transcriptionProviders,
 			Map<AiCapability, List<String>> configuredRoutes) {
-		this(
-				realtimeProviders,
-				llmProviders,
-				scoringProviders,
-				ttsProviders,
-				transcriptionProviders,
-				configuredRoutes,
-				true);
-	}
-
-	AiProviderRegistry(
-			List<RealtimeProvider> realtimeProviders,
-			List<LlmProvider> llmProviders,
-			List<ScoringProvider> scoringProviders,
-			List<TtsProvider> ttsProviders,
-			List<TranscriptionProvider> transcriptionProviders,
-			Map<AiCapability, List<String>> configuredRoutes,
-			boolean qiniuModelsEnabled) {
-		if (!qiniuModelsEnabled) {
-			realtimeProviders = withoutProvider(realtimeProviders, "qiniu");
-			llmProviders = withoutProvider(llmProviders, "qiniu-maas");
-			configuredRoutes = withoutQiniuModels(configuredRoutes);
-			LOGGER.info("Qiniu AI models are disabled; RTI and MaaS adapters will not be registered");
-		}
 		this.realtimeProviders = registerProviders(realtimeProviders, AiCapability.REALTIME);
 		this.llmProviders = registerProviders(llmProviders, AiCapability.LLM);
 		this.scoringProviders = registerProviders(scoringProviders, AiCapability.SCORING);
@@ -189,29 +162,6 @@ public class AiProviderRegistry {
 		this.modelRoutes = buildModelRoutes(configuredRoutes);
 		this.modelDefinitions = buildModelDefinitions();
 		this.models = List.copyOf(modelDefinitions.values());
-	}
-
-	private static <T extends AbstractAiProvider> List<T> withoutProvider(
-			List<T> providers,
-			String providerId) {
-		return providers.stream()
-				.filter(provider -> !provider.providerId().equalsIgnoreCase(providerId))
-				.toList();
-	}
-
-	private static Map<AiCapability, List<String>> withoutQiniuModels(
-			Map<AiCapability, List<String>> configuredRoutes) {
-		if (configuredRoutes == null || configuredRoutes.isEmpty()) return Map.of();
-		Map<AiCapability, List<String>> filtered = new EnumMap<>(AiCapability.class);
-		configuredRoutes.forEach((capability, route) -> filtered.put(
-				capability,
-				route.stream()
-						.map(AbstractAiProvider::normalizeModelId)
-						.filter(modelId -> !modelId.equals(QINIU_REALTIME_PLUS))
-						.filter(modelId -> !modelId.equals(QINIU_MAAS_QWEN_PLUS))
-						.filter(modelId -> !modelId.equals(QINIU_MAAS_DEEPSEEK_FLASH))
-						.toList()));
-		return Map.copyOf(filtered);
 	}
 
 	public List<AiModelDefinition> models() {
@@ -426,9 +376,16 @@ public class AiProviderRegistry {
 			String token,
 			String voice) {
 		if (modelId == null || modelId.isBlank()) {
-			throw new BusinessException(
-					"AI_TTS_MODEL_REQUIRED",
-					"A voice-specific TTS request requires an explicit model");
+			return unboxAudio(invokeRouteWithResult(
+					context,
+					AiCapability.TTS,
+					id -> {
+						AiProviderResponse<byte[]> measured = getTtsProvider(id)
+								.generateSpeechAudioMeasured(
+										text, credential(id, token), voice);
+						return new AiProviderResponse<>(boxAudio(measured.response()),
+								measured.providerRequestId(), measured.usage());
+					}).response());
 		}
 		return invokeExplicitMeasured(context, AiCapability.TTS, modelId,
 				id -> getTtsProvider(id).generateSpeechAudioMeasured(
@@ -444,6 +401,9 @@ public class AiProviderRegistry {
 			String prompt,
 			String token,
 			LlmResponseFormat responseFormat) {
+		if (modelId == null || modelId.isBlank()) {
+			return executeLlmTaskRouted(prompt, token, responseFormat).response();
+		}
 		return invokeExplicitMeasured(
 				automaticContext("llm"),
 				AiCapability.LLM,
@@ -855,7 +815,14 @@ public class AiProviderRegistry {
 
 	private AiInvocationContext automaticContext(String businessScene) {
 		AiInvocationContext scoped = AiInvocationContexts.current();
-		if (scoped != null) return scoped;
+		if (scoped != null) {
+			return new AiInvocationContext(
+					UUID.randomUUID(),
+					scoped.userId(),
+					scoped.sessionId(),
+					scoped.businessScene(),
+					scoped.routeKey());
+		}
 		String userId = null;
 		try {
 			if (authService != null) userId = authService.currentUserIdOrNull();
@@ -877,11 +844,16 @@ public class AiProviderRegistry {
 	}
 
 	private boolean shouldFailOver(BusinessException exception) {
+		String code = exception.code() == null ? "" : exception.code();
+		// Authentication and account-policy failures cannot be retried against the
+		// same Qiniu model, but they must not prevent the configured route fallback.
+		if ("QINIU_MAAS_LLM_REQUEST_FAILED".equals(code)) {
+			return true;
+		}
 		Boolean classifiedRetryable = AbstractAiProvider.retryable(exception);
 		if (classifiedRetryable != null) {
 			return classifiedRetryable;
 		}
-		String code = exception.code() == null ? "" : exception.code();
 		return !code.startsWith("INVALID_")
 				&& !code.startsWith("UNSUPPORTED_")
 				&& !code.endsWith("_INTERRUPTED")

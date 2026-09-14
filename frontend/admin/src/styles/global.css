@@ -1973,12 +1973,23 @@ input:disabled {
 }
 
 .route-add {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   color: var(--muted);
   font-size: 0.68rem;
+}
+
+.route-add__button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 34px;
+}
+
+.route-add small {
+  align-self: center;
 }
 
 .usage-filters {

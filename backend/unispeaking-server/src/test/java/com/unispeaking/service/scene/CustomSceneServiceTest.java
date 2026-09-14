@@ -62,15 +62,16 @@ class CustomSceneServiceTest {
 		CustomSceneDefinition definition = definition("owned", USER_ID, "{}");
 		when(repository.findCustomDefinitionById("owned")).thenReturn(Optional.of(definition));
 		when(profileService.getProfile(USER_ID)).thenReturn(profile("Tina"));
-		when(providers.generateSpeechAudioBytes(AiProviderRegistry.QWEN_TTS, "hello", null, "Tina"))
+		when(providers.generateSpeechAudioBytes((String) null, "hello", null, "Tina"))
 				.thenReturn(new byte[] {1, 2});
 
-		assertArrayEquals(new byte[] {1, 2}, service.synthesizeSpeech("owned", " hello ", "ignored"));
-		verify(providers).generateSpeechAudioBytes(AiProviderRegistry.QWEN_TTS, "hello", null, "Tina");
+		assertArrayEquals(new byte[] {1, 2}, service.synthesizeSpeech("owned", " hello ", null));
+		verify(providers).generateSpeechAudioBytes((String) null, "hello", null, "Tina");
 
-		when(providers.generateSpeechAudioBytes(AiProviderRegistry.QWEN_TTS, "empty", null, "Tina"))
+		when(providers.generateSpeechAudioBytes("cosyvoice-v3-flash", "empty", null, "Tina"))
 				.thenReturn(new byte[0]);
-		assertCode("TTS_AUDIO_EMPTY", () -> service.synthesizeSpeech("owned", "empty", null));
+		assertCode("TTS_AUDIO_EMPTY", () -> service.synthesizeSpeech(
+				"owned", "empty", "cosyvoice-v3-flash"));
 	}
 
 	@Test

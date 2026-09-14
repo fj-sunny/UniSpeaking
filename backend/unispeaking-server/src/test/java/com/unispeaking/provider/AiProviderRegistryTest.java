@@ -3,6 +3,7 @@ package com.unispeaking.provider;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -35,7 +36,7 @@ import org.slf4j.LoggerFactory;
 class AiProviderRegistryTest {
 
 	@Test
-	void disablesAllQiniuAiModelsAtRegistrationBoundary() {
+	void registersQiniuModelsWithoutAnEnvironmentKillSwitch() {
 		AiProviderRegistry registry = new AiProviderRegistry(
 				List.of(new StubQiniuRealtimeProvider(), new StubRealtimeProvider()),
 				llmProviders(),
@@ -49,18 +50,20 @@ class AiProviderRegistryTest {
 						AiCapability.LLM, List.of(
 								AiProviderRegistry.QINIU_MAAS_QWEN_PLUS,
 								AiProviderRegistry.QWEN_LLM_PLUS,
-								AiProviderRegistry.DEEPSEEK_CHAT)),
-				false);
+								AiProviderRegistry.DEEPSEEK_CHAT)));
 
 		assertEquals(
-				List.of(AiProviderRegistry.QWEN_REALTIME_FLASH),
+				List.of(
+						AiProviderRegistry.QINIU_REALTIME_PLUS,
+						AiProviderRegistry.QWEN_REALTIME_FLASH),
 				registry.route(AiCapability.REALTIME));
 		assertEquals(
 				List.of(
+						AiProviderRegistry.QINIU_MAAS_QWEN_PLUS,
 						AiProviderRegistry.QWEN_LLM_PLUS,
 						AiProviderRegistry.DEEPSEEK_CHAT),
 				registry.route(AiCapability.LLM));
-		assertFalse(registry.deployedModels().stream()
+		assertTrue(registry.deployedModels().stream()
 				.anyMatch(model -> model.providerId().startsWith("qiniu")));
 	}
 
@@ -516,10 +519,8 @@ class AiProviderRegistryTest {
 						ProviderType.DEEPSEEK,
 						AiProviderRegistry.QWEN_REALTIME_FLASH,
 						(modelId, provider) -> "unused")).code());
-		assertEquals("AI_TTS_MODEL_REQUIRED", assertThrows(
-				BusinessException.class,
-				() -> registry.generateSpeechAudioBytes(
-						(String) null, "hello", null, "Katerina")).code());
+		assertArrayEquals(new byte[] {1, 2}, registry.generateSpeechAudioBytes(
+				(String) null, "hello", null, "Katerina"));
 	}
 
 	@Test
@@ -691,15 +692,14 @@ class AiProviderRegistryTest {
 	}
 
 	@Test
-	void rejectsNullAudioBytesAndRequiresModelForExplicitVoiceRequests() {
+	void rejectsNullAudioBytesAndRoutesVoiceRequestsWithoutAnExplicitModel() {
 		AiProviderRegistry registry = registry(new StubRealtimeProvider());
 
 		assertEquals("INVALID_AUDIO", assertThrows(
 				BusinessException.class,
 				() -> registry.evaluatePronunciation("hello", new Byte[] {null}, null)).code());
-		assertEquals("AI_TTS_MODEL_REQUIRED", assertThrows(
-				BusinessException.class,
-				() -> registry.generateSpeechAudioBytes(" ", "hello", null, "voice-a")).code());
+		assertArrayEquals(new byte[] {1, 2},
+				registry.generateSpeechAudioBytes(" ", "hello", null, "voice-a"));
 		assertEquals("AI_MODEL_NOT_FOUND", assertThrows(
 				BusinessException.class,
 				() -> registry.executeLlmTask("missing", "prompt", null)).code());
@@ -721,7 +721,32 @@ class AiProviderRegistryTest {
 		assertEquals("qiniu-maas", result.providerId());
 		assertEquals(AiCapability.LLM, result.capability());
 		assertEquals("qiniu-maas", result.response());
-		assertEquals(context, attempts.getFirst().context());
+		assertEquals(context.userId(), attempts.getFirst().context().userId());
+		assertEquals(context.sessionId(), attempts.getFirst().context().sessionId());
+		assertEquals(context.businessScene(), attempts.getFirst().context().businessScene());
+		assertEquals(context.routeKey(), attempts.getFirst().context().routeKey());
+		assertNotEquals(context.logicalRequestId(), attempts.getFirst().context().logicalRequestId());
+	}
+
+	@Test
+	void assignsDistinctLogicalRequestIdsToSequentialCallsInOneScopedTask() {
+		AiProviderRegistry registry = registry(new StubRealtimeProvider());
+		AiInvocationContext context = new AiInvocationContext(
+				UUID.randomUUID(), "user-1", "session-1", "custom_scene_generation", "default");
+		List<AiInvocationAttempt> attempts = new ArrayList<>();
+		registry.configureDynamicRuntime(null, attempts::add, null, credentials());
+
+		AiInvocationContexts.call(context, () -> {
+			registry.executeLlmTask("first", null);
+			registry.executeLlmTask("second", null);
+			return null;
+		});
+
+		assertEquals(2, attempts.size());
+		assertNotEquals(
+				attempts.get(0).context().logicalRequestId(),
+				attempts.get(1).context().logicalRequestId());
+		assertTrue(attempts.stream().allMatch(attempt -> attempt.attemptNo() == 1));
 	}
 
 	@Test
@@ -809,8 +834,7 @@ class AiProviderRegistryTest {
 				" qwen3.5-plus , DEEPSEEK-V4-FLASH ",
 				" iflytek-suntone ",
 				" qwen3-tts-flash ",
-				" stub-asr ",
-				true);
+				" stub-asr ");
 
 		assertEquals(List.of(AiProviderRegistry.QWEN_REALTIME_FLASH),
 				registry.route(AiCapability.REALTIME));
@@ -1175,7 +1199,7 @@ class AiProviderRegistryTest {
 
 		@Override
 		public String executeLlmTask(String prompt, String token) {
-			throw new BusinessException("QINIU_MAAS_LLM_IO_ERROR", "unavailable");
+			throw nonRetryableFailure("QINIU_MAAS_LLM_REQUEST_FAILED", "forbidden");
 		}
 	}
 

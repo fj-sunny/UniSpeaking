@@ -92,12 +92,9 @@ public class CustomSceneGenerator {
 		String normalizedInput = requiredInput(sceneInput);
 		String prompt = buildPrompt(normalizedInput, currentPreference, profile);
 		BusinessException lastFailure = null;
-		List<String> models = List.of(
-				AiProviderRegistry.QWEN_LLM_FLASH,
-				AiProviderRegistry.QWEN_LLM_PLUS);
-		for (int index = 0; index < models.size(); index++) {
+		int maximumAttempts = 2;
+		for (int index = 0; index < maximumAttempts; index++) {
 			int attempt = index + 1;
-			String modelId = models.get(index);
 			String attemptPrompt = attempt == 1
 					? prompt
 					: prompt + "\n\nA prior generation attempt did not satisfy the JSON contract. "
@@ -105,7 +102,7 @@ public class CustomSceneGenerator {
 			try {
 				long llmStartedAt = System.nanoTime();
 				String content = providerRegistry.executeLlmTask(
-						modelId,
+						null,
 						attemptPrompt,
 						null,
 						LlmResponseFormat.JSON_OBJECT);
@@ -118,9 +115,8 @@ public class CustomSceneGenerator {
 				catch (BusinessException exception) {
 					if ("CUSTOM_SCENE_LLM_RESPONSE_INVALID".equals(exception.code())) {
 						LOGGER.warn(
-								"custom scene LLM response rejected sceneId={} model={} attempt={} llmMs={} parseMs={} responseChars={}",
+								"custom scene LLM response rejected sceneId={} route=default attempt={} llmMs={} parseMs={} responseChars={}",
 								sceneId,
-								modelId,
 								attempt,
 								llmMillis,
 								elapsedMillis(parseStartedAt),
@@ -129,9 +125,8 @@ public class CustomSceneGenerator {
 					throw exception;
 				}
 				LOGGER.info(
-						"custom scene LLM completed sceneId={} model={} attempt={} llmMs={} parseMs={}",
+						"custom scene LLM completed sceneId={} route=default attempt={} llmMs={} parseMs={}",
 						sceneId,
-						modelId,
 						attempt,
 						llmMillis,
 						elapsedMillis(parseStartedAt));
@@ -139,12 +134,11 @@ public class CustomSceneGenerator {
 			}
 			catch (BusinessException exception) {
 				lastFailure = exception;
-				if (index + 1 < models.size()) {
+				if (index + 1 < maximumAttempts) {
 					LOGGER.warn(
-							"custom scene LLM falling back sceneId={} failedModel={} nextModel={} code={}",
+							"custom scene LLM retrying configured route sceneId={} attempt={} code={}",
 							sceneId,
-							modelId,
-							models.get(index + 1),
+							attempt,
 							exception.code());
 					continue;
 				}
