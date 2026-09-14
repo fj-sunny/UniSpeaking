@@ -67,8 +67,18 @@ compose=(docker compose --project-name "$PROJECT_NAME" --env-file "$ENV_FILE" --
 "${compose[@]}" config --format json | grep -Fq 'deploy_postgres_data' \
   || fail "Compose 未使用 deploy_postgres_data"
 
-log "构建应用镜像"
-"${compose[@]}" build backend frontend admin || fail "应用镜像构建失败，未启动新版本"
+log "逐个构建应用镜像"
+for service in backend frontend admin; do
+  "${compose[@]}" build "$service" || fail "$service 镜像构建失败，未启动新版本"
+done
+
+# Compose/BuildKit must not be allowed to publish swapped frontend image tags.
+docker run --rm --entrypoint /bin/sh deploy-frontend:latest -ec \
+  '! grep -Fq "/admin/assets/" /usr/share/nginx/html/index.html' \
+  || fail "用户前端镜像内容异常，拒绝启动新版本"
+docker run --rm --entrypoint /bin/sh deploy-admin:latest -ec \
+  'grep -Fq "/admin/assets/" /usr/share/nginx/html/index.html' \
+  || fail "Admin 镜像内容异常，拒绝启动新版本"
 
 log "启动生产服务"
 "${compose[@]}" up -d --no-build postgres backend frontend admin nginx \
