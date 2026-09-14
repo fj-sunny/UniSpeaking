@@ -41,10 +41,9 @@ current_sha="$(git -C "$BASE_DIR" rev-parse HEAD)"
 env_sha="$(sha256sum "$ENV_FILE" | awk '{print $1}')"
 
 if [[ -f "$STATE_FILE" ]] \
-  && [[ "$(sed -n 's/^sha=//p' "$STATE_FILE" | head -n 1)" == "$target_sha" ]] \
-  && [[ "$(sed -n 's/^env_sha=//p' "$STATE_FILE" | head -n 1)" == "$env_sha" ]]; then
-  log "当前已部署 $target_sha，源码和环境均无变化"
-  exit 0
+  && [[ "$(sed -n 's/^sha=//p' "$STATE_FILE" | head -n 1)" == "$target_sha" ]]; then
+	log "GitHub 提交未变化（$target_sha），保留服务器当前源码和运行实例"
+	exit 0
 fi
 
 log "同步源码：$current_sha -> $target_sha"
