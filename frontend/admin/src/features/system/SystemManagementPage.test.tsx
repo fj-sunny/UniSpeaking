@@ -90,6 +90,17 @@ describe('SystemManagementPage', () => {
     expect(replaceRoute).toHaveBeenCalledWith('LLM', ['deepseek-v4-flash', 'qwen3.5-plus'])
   })
 
+  it('keeps an explicit add fallback button visible when no candidates remain', async () => {
+    vi.mocked(getAiConfiguration).mockResolvedValue(configuration)
+
+    renderPage(<SystemManagementPage />)
+
+    const add = await screen.findByRole('button', { name: '文本模型添加备用模型' })
+    expect(add).toBeVisible()
+    expect(add).toBeDisabled()
+    expect(screen.getByText('没有其他已启用模型')).toBeInTheDocument()
+  })
+
   it('updates the complete Qwen credential form through the real admin flow', async () => {
     vi.mocked(getAiConfiguration).mockResolvedValue(configuration)
     vi.mocked(getCredentialStatus)

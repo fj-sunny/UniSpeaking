@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowDown, ArrowUp, Bot, BrainCircuit, KeyRound, Mic2, Radio, RefreshCw,
-  Save, Sparkles, Volume2, X,
+  Plus, Save, Sparkles, Volume2, X,
   type LucideIcon,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -207,6 +207,7 @@ function ModelDialog({ model, onClose, onChanged }: { model: ModelView; onClose:
 
 function RouteEditor({ models, routes, onChanged }: { models: ModelView[]; routes: Array<{ capability: AiCapability; modelIds: string[] }>; onChanged: () => Promise<unknown> }) {
   const [drafts, setDrafts] = useState<Record<string, string[]>>({})
+  const [adding, setAdding] = useState<AiCapability | null>(null)
   useEffect(() => setDrafts(Object.fromEntries(routes.map((route) => [route.capability, route.modelIds]))), [routes])
   const mutation = useMutation({ mutationFn: ({ capability, modelIds }: { capability: AiCapability; modelIds: string[] }) => replaceRoute(capability, modelIds), onSuccess: onChanged })
   const move = (capability: AiCapability, index: number, offset: number) => setDrafts((current) => { const list = [...(current[capability] || [])]; const target = index + offset; if (target < 0 || target >= list.length) return current; [list[index], list[target]] = [list[target], list[index]]; return { ...current, [capability]: list } })
@@ -227,7 +228,11 @@ function RouteEditor({ models, routes, onChanged }: { models: ModelView[]; route
               <button type="button" title="移出路由" aria-label={`移出 ${modelId}`} disabled={list.length === 1} onClick={() => setDrafts({ ...drafts, [route.capability]: list.filter((id) => id !== modelId) })}><X size={12} /></button>
             </span>
           </li> })}</ol>
-          {candidates.length > 0 && <label className="route-add"><span>添加备用</span><select value="" aria-label={`${capabilityLabels[route.capability]}添加备用模型`} onChange={(event) => { if (event.target.value) setDrafts({ ...drafts, [route.capability]: [...list, event.target.value] }) }}><option value="">选择模型</option>{candidates.map((model) => <option key={model.modelId} value={model.modelId}>{model.modelId}</option>)}</select></label>}
+          <div className="route-add">
+            <button type="button" className="quiet-button route-add__button" aria-label={`${capabilityLabels[route.capability]}添加备用模型`} disabled={candidates.length === 0} onClick={() => setAdding(adding === route.capability ? null : route.capability)}><Plus size={13} />添加备用模型</button>
+            {adding === route.capability && candidates.length > 0 && <select autoFocus value="" aria-label={`${capabilityLabels[route.capability]}选择备用模型`} onChange={(event) => { if (event.target.value) { setDrafts({ ...drafts, [route.capability]: [...list, event.target.value] }); setAdding(null) } }}><option value="">选择模型</option>{candidates.map((model) => <option key={model.modelId} value={model.modelId}>{model.displayName} · {model.modelId}</option>)}</select>}
+            {candidates.length === 0 && <small>没有其他已启用模型</small>}
+          </div>
         </article>
     })}</div>
   </section>
