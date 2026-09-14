@@ -39,6 +39,8 @@ public class QwenLlmProvider extends LlmProvider {
 	private final ObjectMapper objectMapper;
 	private final String apiKey;
 	private final URI endpoint;
+	private String workspaceId = "";
+	private String region = "";
 	private final String model;
 	private final Duration readTimeout;
 	private final int maxResponseBytes;
@@ -63,6 +65,8 @@ public class QwenLlmProvider extends LlmProvider {
 				model,
 				positiveDuration(readTimeoutSeconds, "Qwen LLM read timeout"),
 				maxResponseBytes);
+		this.workspaceId = trim(workspaceId);
+		this.region = trim(region);
 	}
 
 	public QwenLlmProvider(
@@ -131,7 +135,8 @@ public class QwenLlmProvider extends LlmProvider {
 		if (prompt.isBlank()) {
 			throw nonRetryableFailure("INVALID_LLM_PROMPT", "LLM task prompt is required");
 		}
-		requireHttpsEndpoint();
+		URI requestEndpoint = resolveEndpoint();
+		requireHttpsEndpoint(requestEndpoint);
 
 		try {
 			Map<String, Object> body = new LinkedHashMap<>();
@@ -142,7 +147,7 @@ public class QwenLlmProvider extends LlmProvider {
 				body.put("response_format", Map.of("type", "json_object"));
 			}
 			HttpRequest httpRequest = HttpRequest.newBuilder()
-					.uri(endpoint)
+					.uri(requestEndpoint)
 					.timeout(readTimeout)
 					.header("Authorization", "Bearer " + credential)
 					.header("Content-Type", "application/json")
@@ -225,19 +230,27 @@ public class QwenLlmProvider extends LlmProvider {
 		}
 	}
 
-	private void requireHttpsEndpoint() {
-		String host = endpoint == null || endpoint.getHost() == null
+	private URI resolveEndpoint() {
+		String effectiveWorkspaceId = ProviderCredentialOverride.currentOr("workspaceId", workspaceId);
+		if (!effectiveWorkspaceId.isBlank()) {
+			return buildEndpoint(effectiveWorkspaceId, region);
+		}
+		return endpoint;
+	}
+
+	private void requireHttpsEndpoint(URI requestEndpoint) {
+		String host = requestEndpoint == null || requestEndpoint.getHost() == null
 				? ""
-				: endpoint.getHost().toLowerCase(java.util.Locale.ROOT);
-		if (endpoint == null
-				|| !endpoint.isAbsolute()
-				|| !"https".equalsIgnoreCase(endpoint.getScheme())
+				: requestEndpoint.getHost().toLowerCase(java.util.Locale.ROOT);
+		if (requestEndpoint == null
+				|| !requestEndpoint.isAbsolute()
+				|| !"https".equalsIgnoreCase(requestEndpoint.getScheme())
 				|| !host.endsWith(".maas.aliyuncs.com")
-				|| endpoint.getUserInfo() != null
-				|| endpoint.getPort() != -1
-				|| !"/compatible-mode/v1/chat/completions".equals(endpoint.getPath())
-				|| endpoint.getRawQuery() != null
-				|| endpoint.getRawFragment() != null) {
+				|| requestEndpoint.getUserInfo() != null
+				|| requestEndpoint.getPort() != -1
+				|| !"/compatible-mode/v1/chat/completions".equals(requestEndpoint.getPath())
+				|| requestEndpoint.getRawQuery() != null
+				|| requestEndpoint.getRawFragment() != null) {
 			throw retryableFailure(
 					"QWEN_LLM_ENDPOINT_INVALID",
 					"Qwen LLM endpoint must be the trusted Aliyun compatible-mode URL");
